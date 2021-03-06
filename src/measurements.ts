@@ -3,15 +3,15 @@ class Measurements {
 
 	edgeMargin = 0.2 / this.technicUnit;
 	interiorRadius = 3.2 / this.technicUnit;
-	pinHoleRadius = 2.6 / this.technicUnit;
+	pinHoleRadius = 2.55 / this.technicUnit;
 	pinHoleOffset = 0.7 / this.technicUnit;
 	axleHoleSize = 1.01 / this.technicUnit;
-	pinRadius = 2.73 / this.technicUnit;
+	pinRadius = 2.44 / this.technicUnit;
 	ballBaseRadius = 1.6 / this.technicUnit;
 	ballRadius = 3.0 / this.technicUnit;
-	pinLipRadius = 0.17 / this.technicUnit;
-	axleSizeInner = 0.87 / this.technicUnit;
-	axleSizeOuter = 2.11 / this.technicUnit;
+	pinLipRadius = 0.06 / this.technicUnit;
+	axleSizeInner = 0.82 / this.technicUnit;
+	axleSizeOuter = 2.09 / this.technicUnit;
 	attachmentAdapterSize = 0.4 / this.technicUnit;
 	attachmentAdapterRadius = 3 / this.technicUnit;
 	interiorEndMargin = 0.2 / this.technicUnit;
