@@ -1,5 +1,5 @@
 class Mesh {
-    private triangles: Triangle[];
+    public readonly triangles: Triangle[];
 
     private vertexBuffer: WebGLBuffer = null;
     private normalBuffer: WebGLBuffer = null;
@@ -78,49 +78,6 @@ class Mesh {
         array.push(vector.x);
         array.push(vector.y);
         array.push(vector.z);
-    }
-
-    private createSTLFile(scalingFactor: number): ArrayBuffer {
-        let size = 84 + 50 * this.triangles.length;
-        var buffer = new ArrayBuffer(size);
-        let view = new DataView(buffer, 0, size);
-
-        for (var i = 0; i < 80; i++) {
-            view.setInt8(i, 0);
-        }
-        
-        var p = 80;
-        view.setInt32(p, this.triangles.length, true);
-        p += 4;
-
-        for (let triangle of this.triangles) {
-            this.writeTriangle(view, p, triangle, scalingFactor);
-            p += 50;
-        }
-
-        return buffer;
-    }
-
-    private writeVector(view: DataView, offset: number, vector: Vector3) {
-        view.setFloat32(offset, vector.z, true);
-        view.setFloat32(offset + 4, vector.x, true);
-        view.setFloat32(offset + 8, vector.y, true);
-    }
-
-    private writeTriangle(view: DataView, offset: number, triangle: Triangle, scalingFactor: number) {
-        this.writeVector(view, offset, triangle.normal());
-        this.writeVector(view, offset + 12, triangle.v1.times(scalingFactor));
-        this.writeVector(view, offset + 24, triangle.v2.times(scalingFactor));
-        this.writeVector(view, offset + 36, triangle.v3.times(scalingFactor));
-        view.setInt16(offset + 48, 0, true);
-    }
-
-    public saveSTLFile(scalingFactor: number, filename = "part.stl") {
-        let blob = new Blob([this.createSTLFile(scalingFactor)], { type: "application/octet-stream" });
-        let link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
-        link.download = filename;
-        link.click();
     }
 
     public getVertexCount(): number {
