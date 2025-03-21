@@ -15,8 +15,9 @@ window.onpopstate = function (event) {
     }
 };
 class MeshGenerator {
+    triangles = [];
+    measurements;
     constructor(measurements) {
-        this.triangles = [];
         this.measurements = measurements;
     }
     getMesh() {
@@ -104,6 +105,8 @@ class MeshGenerator {
     }
 }
 class PartMeshGenerator extends MeshGenerator {
+    smallBlocks;
+    tinyBlocks;
     constructor(part, measurements) {
         super(measurements);
         this.smallBlocks = part.createSmallBlocks();
@@ -1081,26 +1084,32 @@ function ease(value) {
 function mod(a, b) {
     return ((a % b) + b) % b;
 }
-class Measurements {
-    constructor() {
-        this.technicUnit = 8;
-        this.edgeMargin = 0.2 / this.technicUnit;
-        this.interiorRadius = 3.2 / this.technicUnit;
-        this.pinHoleRadius = 2.6 / this.technicUnit;
-        this.pinHoleOffset = 0.7 / this.technicUnit;
-        this.axleHoleSize = 1.01 / this.technicUnit;
-        this.pinRadius = 2.315 / this.technicUnit;
-        this.ballBaseRadius = 1.6 / this.technicUnit;
-        this.ballRadius = 3.0 / this.technicUnit;
-        this.pinLipRadius = 0.17 / this.technicUnit;
-        this.axleSizeInner = 0.86 / this.technicUnit;
-        this.axleSizeOuter = 2.15 / this.technicUnit;
-        this.attachmentAdapterSize = 0.4 / this.technicUnit;
-        this.attachmentAdapterRadius = 3 / this.technicUnit;
-        this.interiorEndMargin = 0.2 / this.technicUnit;
-        this.lipSubdivisions = 6;
-        this.subdivisionsPerQuarter = 8;
+function containsPoint(list, query) {
+    for (var item of list) {
+        if (query.equals(item)) {
+            return true;
+        }
     }
+    return false;
+}
+class Measurements {
+    technicUnit = 8;
+    edgeMargin = 0.2 / this.technicUnit;
+    interiorRadius = 3.2 / this.technicUnit;
+    pinHoleRadius = 2.475 / this.technicUnit;
+    pinHoleOffset = 0.89 / this.technicUnit;
+    axleHoleSize = 1.01 / this.technicUnit;
+    pinRadius = 2.44 / this.technicUnit;
+    ballBaseRadius = 1.6 / this.technicUnit;
+    ballRadius = 3.0 / this.technicUnit;
+    pinLipRadius = 0.06 / this.technicUnit;
+    axleSizeInner = 0.82 / this.technicUnit;
+    axleSizeOuter = 2.09 / this.technicUnit;
+    attachmentAdapterSize = 0.4 / this.technicUnit;
+    attachmentAdapterRadius = 3 / this.technicUnit;
+    interiorEndMargin = 0.2 / this.technicUnit;
+    lipSubdivisions = 6;
+    subdivisionsPerQuarter = 8;
     enforceConstraints() {
         this.lipSubdivisions = Math.max(2, Math.ceil(this.lipSubdivisions));
         this.subdivisionsPerQuarter = Math.max(2, Math.ceil(this.subdivisionsPerQuarter / 2) * 2);
@@ -1120,15 +1129,28 @@ class Measurements {
 }
 const DEFAULT_MEASUREMENTS = new Measurements();
 class Catalog {
+    container;
+    pbocontainer;
+    initialized = false;
+    pboinitialized = false;
+    items;
+    pboitems;
     constructor() {
-        this.initialized = false;
         this.container = document.getElementById("catalog");
         this.createCatalogItems();
         document.getElementById("catalog").addEventListener("toggle", (event) => this.onToggleCatalog(event));
+        this.pbocontainer = document.getElementById("pbocatalog");
+        this.createPBOCatalogItems();
+        document.getElementById("pbocatalog").addEventListener("toggle", (event) => this.onTogglePBOCatalog(event));
     }
     onToggleCatalog(event) {
-        if (event.srcElement.open && !this.initialized) {
+        if (event.target.open && !this.initialized) {
             this.createCatalogUI();
+        }
+    }
+    onTogglePBOCatalog(event) {
+        if (event.target.open && !this.pboinitialized) {
+            this.createPBOCatalogUI();
         }
     }
     createCatalogUI() {
@@ -1149,7 +1171,7 @@ class Catalog {
         for (var item of this.items) {
             var catalogLink = document.createElement("a");
             catalogLink.className = "catalogItem";
-            catalogLink.href = "?part=" + item.string;
+            catalogLink.href = "?part=" + item.string + "&name=" + encodeURIComponent(item.name);
             catalogLink.title = item.name;
             this.container.appendChild(catalogLink);
             var itemCanvas = document.createElement("canvas");
@@ -1174,6 +1196,50 @@ class Catalog {
         gl = oldRenderingContext;
         this.initialized = true;
         this.container.removeChild(canvas);
+    }
+    createPBOCatalogUI() {
+        var oldRenderingContext = gl;
+        var canvas = document.createElement("canvas");
+        canvas.style.height = "64px";
+        canvas.style.width = "64px";
+        this.pbocontainer.appendChild(canvas);
+        var camera = new Camera(canvas, 2);
+        camera.clearColor = new Vector3(0.859, 0.859, 0.859);
+        var partRenderer = new MeshRenderer();
+        partRenderer.color = new Vector3(0.67, 0.7, 0.71);
+        var partNormalDepthRenderer = new NormalDepthRenderer();
+        camera.renderers.push(partRenderer);
+        camera.renderers.push(partNormalDepthRenderer);
+        camera.renderers.push(new ContourPostEffect());
+        var measurements = new Measurements();
+        for (var item of this.pboitems) {
+            var catalogLink = document.createElement("a");
+            catalogLink.className = "catalogItem";
+            catalogLink.href = "?part=" + item.string;
+            catalogLink.title = item.name;
+            this.pbocontainer.appendChild(catalogLink);
+            var itemCanvas = document.createElement("canvas");
+            catalogLink.appendChild(itemCanvas);
+            itemCanvas.style.height = "64px";
+            itemCanvas.style.width = "64px";
+            var mesh = new PartMeshGenerator(item.part, measurements).getMesh();
+            partRenderer.setMesh(mesh);
+            partNormalDepthRenderer.setMesh(mesh);
+            camera.size = (item.part.getSize() + 2) * 0.41;
+            camera.transform = Matrix4.getTranslation(item.part.getCenter().times(-0.5))
+                .times(Matrix4.getRotation(new Vector3(0, 45, -30))
+                .times(Matrix4.getTranslation(new Vector3(-0.1, 0, 0))));
+            camera.render();
+            var context = itemCanvas.getContext("2d");
+            context.canvas.width = gl.canvas.width;
+            context.canvas.height = gl.canvas.height;
+            context.drawImage(canvas, 0, 0);
+            let itemCopy = item;
+            catalogLink.addEventListener("click", (event) => this.onSelectPart(itemCopy, event));
+        }
+        gl = oldRenderingContext;
+        this.pboinitialized = true;
+        this.pbocontainer.removeChild(canvas);
     }
     createCatalogItems() {
         this.items = [
@@ -1238,16 +1304,49 @@ class Catalog {
             new CatalogItem(15460, "Hole with 3 Ball Joints", "0z52z57x11ez532z517y526y511x1")
         ];
     }
+    createPBOCatalogItems() {
+        this.pboitems = [
+            // General
+            new CatalogItem(1, "Pin 2L", "0y01y04y3ay314y323y3"),
+            new CatalogItem(2, "Pin 2.5L", "0y01y04y3ay314y323y338y3"),
+            new CatalogItem(4, "Axle pin 1.5L", "0y01y04y4ay414y4"),
+            new CatalogItem(5, "Axle pin 2L", "0y01y04y4ay414y423y4"),
+            new CatalogItem(6, "Half beam 3 holes", "0Y17y11eY1"),
+            new CatalogItem(7, "Half beam 3L 2 axle holes", "1ex27X00x2"),
+            // Rewinder
+            new CatalogItem(10, "Rewinder Front Right Side", "113Y2155Y21bcY0217Y029dY0315Y03beY0457Y0a4X211bX01c2X02a1X03c0X0527Y06deX08edX0b5cX0e33X0117aX01539X01978X21e3fX02396X02985Z02cb8Z03014Z0339aZ0374bZ03b28Z03f32Z0436aZ047d1Z04c68Z05130Z0562aZ05b57Z060b8Z0664eY0721dX25e5Y06be5Y02fc5Y136f8Y03edbY05af4Y071b2Y03322Y03aaaY042e6Y06022z065b5z077b6Y036a9Y03e88Y0471fY07df2z0849cz03a5bX04293X04b87X0dbX2169X022bX0329X046bX07dbX0a19X0cbbX0fc9X0134bX01749X01bcbX220d9X0267bX07859X23e61X046f6X0504bX06e0X06650X0721fX07ecez2857cz2714dy08b83Y04295Y14b89Y25541Y1926dY046ceY15021Y25a3cY17ddX06c1dX0785bX08f1X07221X07ed0Y08c67X08545Y07df6Z084a0Z09a04Y0a167Y08b1az09239z0a1dX0785dX0938dX0b62Y27ed2X08c69x09af0X0ca7Y28b87y0a97dY19271z199cez1b15dY1a0faY08581X0938fx0a291X0e3bY08c6bX09af2X0aa71X0fb5Y09a08y0b9f6Y0a16bY0c257Y0a90cz0b125z09391X0a293X0b291X01184Y29af4X0aa73X0baf2z2c394z21337Y2a981y0cb77z0d49cz0a295X0b293X06eaX28f9X0b68X0e3fX01186X01545X01984X01e4bX023a2X02991X03020Y03757X03f3eX247ddX0513cX05b63X0665aX07229X07ed8Z08586Z08c6fX09af6Z0a296Z0aa75Z0b294Z0baf4X0cc7bX2337dY0a9faY0cbf8z0d51fz0b1daz0ba37z0de08z0e7b8z07e7X2a25X0cc7X0fd5X01357X01755X01bd7X020e5X02687X02cc5X03b35X04377X24c75X05637X060c5X06c27X07865X09395X0c397X0d5a5X23759Y08c71Y03b0bY0935bY03f42Y09afay1434dY0a25dy147e3Y04c4bY05144y1560dy1"),
+            new CatalogItem(11, "Rewinder Front Left Side", "1a3Y21feY21bcX0280X0225X0306X029dZ0324Z039dY0436Y03beZ0468Z0502Y05c0Y0a4X211bY01c2Y02a1Y03c0Y0527Y06deY08edY0b5cY0e33Y0117aY01539Y01978x21e3fY02396Y02985Z02cb8Z03014Z0339aZ0374bZ03b28Z03f32Z0436aZ047d1Z04c68Z05130Z0562aZ05b57Y0664eY0721dX215dY021dY0319Y0459Y05e5Y07c5Y0a01Y0ca1Y0fadY0132dY01729Y020b5Y02655Y06085Y06be5Y06b7Y079eY0dbX21bcbx27859X23016Y1374dy23f34Y16650X0721fX07eceZ2857cZ23373Y13affy2433fY18c4Y09d8Y06c1dX0785bX07221X07ed0Z0857eZ08c67Z0938cZ0b31Y0c76Y0785dX07ed2X08c69Z0938eZ09af0Z0a290Z0e06Y2f80Y28581X08c6bX09af2Z0a292Z0aa71Z0b290Z0114bY012feY09391X09af4X0aa73Z0b292Z0baf2Z2c394Z21508Y216f8Y2a295X06eaX28f9y0b68y0e3fy01186y01545y01984y01e4by023a2y02991y03020y03757y03f3ex247ddy0513cY05b63Z060c4Z0665aZ06c26Z07229Z07864Z07ed8Z08586Z08c6fZ09394Z09af6Z0a296Z0aa75Y0baf4Y0cc7bX2a0dy0cady0fb9y01339y01735y01bb5y020c1y02661y02c9dy0337dy03b09y04c45y05605Y0b255Y0c355Y01945Y01b76Y07e7X24377x2d5a5X23759Y08c71Y03b0bY0935bY03f42Y09afay1434dY0a25dy147e3Y04c4bY05144y1560dy1"),
+            new CatalogItem(12, "Rewinder Rear Right Side", "0y07X21eY04dY09cY0113Y21bay0299Y03b8Y051fY06d6y01y02dY069Y0c9Y0155Y2215y0311Y0451Y05ddY07bdy011X29X08e7Y09fbY013X022Y1b58Y231Y1c9dY253y1e31Z0fc6Z06fy1a4y1117aZ0134aZ0d1y111dy11c4y02a3y03c2Y0529x06e0x08efx0b5ex0e35x0117cY0153bY015fy121fy031by045bY0132fY0172bY05fbx07ddx0a1bx0cbdx0fcbx01c6y13c4y2197cZ01bceZ0221y145dy22a7y152dy01e45Z020deZ031fy15eby03c8y16e6y2239eZ02682Z0461y17cdy2531y16e8y08f7Y0b66Y0e3dx01184x01543x01982x01e49x023a0Y0298fY05efy17cfy0a0bY0cabY0265fY02c9bY0fd3x01355x01753x01bd5x020e3x06eay13020Z233a6Z27d1y18fby13759Y0a0fy13b0bY0b6cy13f42Z2437aZ2cb1y1e45y147e3Y0fbfy14c4bY0118eY05144Y01341Y0560dY0154fY0198ey01e55Y023acY0299bx0302ax03761x03f48x047e7x05146Y05b6dY0173fY01bbfy020cbY0266bY0560fY0609bY02ccfx033b1x03b3fx04381x04c7fx01990Y06666Y01bc1Y06bfdY01e59Y07237Y020cfY0783bY023b2Y07ee8Y02671Y0855dY029a3Y08c81Y02cafY0936bY03034Y19b0aY23391Y1a26dY2376dY0aa8bY03b1fY0b26bY03f56y047f5x05154x05b7bx06672x07241X27ef0x08c87x09b0ex0aa8dx0bb0cy04361y0c36dy04c8dx0564fx060ddx06c3fx0787dX2859fx093adx0a2afx0b2adx0"),
+            new CatalogItem(13, "Rewinder Rear Left Side", "0y07X21eY04dY09cY0113Y21bay0299Y03b8Y051fY06d6y01y02dY069Y0c9Y0155Y2215y0311Y0451Y05ddY07bdy011X29Y08e7Y0fY09fbY022Y1b58Y231Y1c9dY253y1e31Z0fc6Z06fy1a4Y1117aZ0134aZ0d1Y111dY11c4Z022cZ02a3y03c2Y0529Z05faZ06e0Z07dcZ08efZ0a1aZ0b5eZ0cbcZ0e35Z0fcaZ0117cY0153bY015fY131by045bY0132fY0172bY01c6Y1197cZ01bceZ0221Y12a7Y11e45Z020deZ031fY13c8Y1239eZ02682Z0461Y1531Y1298fY05efY12c9bY06eaY13020Z233a6Z27d1Y18fby13759Y0a0fy13b0bY0b6cy13f42Z2437aZ2cb1y1e45Y047e3Y0fbfY04c4bY0118eY0154dZ0175cZ0198cZ01bdeZ01e53Z020ecZ023aaZ0268eZ02999Z02cccZ03028Z033aeZ05144Y01341Y0560dY0154fY03761Z13b3eZ13f48Z04380Z047e7Z04c7eZ05146Z05640Z05b6dY0173fY0609bY01990Y03f4aZ24382Z26666Y01bc1Y06bfdY01e59Y047ebZ14c82Z1514aZ05644Z05b71Z060d2Z06668Z06c34Z07237Y020cfY0783bY023b2Y07ee8Y02671Y0855dY029a3Y08c81Y02cafY0936bY03034Y19b0aY23391Y1a26dY2376dY0aa8bY03b1fY0b26bY03f56y047f5x05154x05b7bx06672x07241X27ef0x08c87x09b0ex0aa8dx0bb0cy04361y0c36dy04c8dx0564fx060ddx06c3fx0787dX2859fx093adx0a2afx0b2adx0"),
+            new CatalogItem(14, "Rewinder Motor Assembly", "1eY02dY042Y05eY082Y0afY0e6Y0128Y0176X123ax033aX1489X0628x01d7X12b8x03d9X154fX0719x04fX073X051Z074Z0a0X0117Y029dY0523Z05f4Z08e9Z0a14Z0e2fZ0fc4Z0159Y0315Y046Y291Y0104Y01a7Y0282y039dX0500Y06b3Y08beY0b29Y0dfcY0113fY014faY2202Y026bY04e1Y02e3Y059fY036bY1671Y0404Y1758Y0855Y0969Y0a95Y0bdaY0d39X1d7X0446X0ec3X13beY0457Y093Y0502Y01937Y04c8Y2586Y211bZ0168Z02a1Y0527Y08edZ0a18Z0e33Z0fc8Z01539Z01748Z0319Y05e5Y0108Y21abY0286Y03a1Y0504y06b7Y08c2Y0b2dY0e00Y01143Y014feY01939Y01dfcY243aY04e5Y05a3Y0675Y175cY13c2Y06e0Y052bY08f1z0a1cz06e4Y0b62X0e06X01116Y112c9Y1cc1X0f9aX08f5Y0e3bz0fd0z0b66Y01184Y0e3fz0fd4z01545Y01188X01547x01986y01e4dy01bb7y020c3y0150cX0190cY11b3dY11359X01757x0171aX0e43Z2fd8Z2118aY01549y023a6X02995Y03024Y0375bY03f42Y047e1Z24c78Z2133dY01739y02ca1Y03381Y03b0dY0434dY0294aX02f8aY132e7Y1268bX02c7cX02997X02ccbX03028Y23385Y2"),
+            new CatalogItem(15, "Rewinder Wheel Drive Assembly", "d1aY1e94Y1b9aZ0d03Y0102aY113c9Y017e8Z0e73Z01c6cZ011bcZ1217cZ1a76Y1bbbY11047X013cbY0d37X0120aX0ec1X024fbX03dbX01fa2X02530X21d0X22baX013ecZ015edZ017ecY0a7aZ0bccZ0d39Z0ec2Z01068Z0122cZ0140fZ01612Z01836Z01a7cZ01ce5Z01f72Z02224Z024fcZ027fbZ02b22Z0823Z0942Z062cZ071cZ048dZ0552Z0be9Z0108bZ02257X0349X0ed2Y0978Z2d7bZ2767Z0874Y0ad7Z0690Z0788Z0500Z05cfZ03bcY4455Y42532X03eaX0"),
+            new CatalogItem(16, "Rewinder 12L Brace", "0Z22Z29X013X022X037X053X077X0a4X0dbX011dX016bX01c6X022fX02a7X032fX03c8X0473X0531X0603X06eaX07e7X08fbZ2a26Z2"),
+            new CatalogItem(17, "Rewinder 13L Brace", "9Z012Z022Z036Z053Z076Z0a4Z0daZ011dZ016aZ01c6Z022eZ02a7Z032eZ03c8Z0472Z0531Z0602Z06eaZ07e6Z08fbZ0a26Z0b6cZ2ccaZ20Z22Z2"),
+            new CatalogItem(18, "Rewinder 11L Inside Brace", "0X23X29X013X022X037X053X077X0a4X0dbX011dX016bX01c6X022fX02a7X032fX03c8X0473X0531X0603X06eaX27e7X2"),
+            new CatalogItem(19, "Rewinder Linking Bracket Left", "4dZ270Z24x017Z029Z042Z063Z08dx014Z024Z038Z255Z2cx0c2x0"),
+            new CatalogItem(20, "Rewinder Linking Bracket Right", "1eZ232Z24x017X042x014X038z055z0cx02aX064x025X07dZ2adZ2"),
+            new CatalogItem(21, "Rewinder Drive Lock Lever", "0Y21Y24Z1bZ1"),
+            //Air Exchanger
+            new CatalogItem(31, "AirExchanger Bracket", "0x07X01eX04dX04X017X042X08dX014X03bX082X0f1X038X07bX0e6X0181X078X0dfX0176X0245X0dcX016fX023aX0345X016cX0233X033aX0489X0230X0333X047eX0619X0330X0477X060eX07fdX0474X0607X07f2X0a3dX0604X07ebX0a32X0ce1X07e8X0a2bX0cd6X0ff1X0a28X0ccfX0fe6X01375X0cccX0fdfX0136aX01775X0fdcx01363X0176aX01bf9X01e4Y024dY011acX01386X02d8Y0360Y01580X0179bX0410Y04bbY019d8X01c38X0594Y0666Y01ebcX02165X076cY0869Y02434X0272aX09a0Y0accY02a48X02d8fX0c38Y0d97Y03100X0349cX07b8X09f2X1c63X1f3cY010d2Y03864X08caX0b35X1dd9X13c59X09f4X012b4X01675Y01885Y01ab6Y01d09Y01f7fY02219Y024d8Y027bdY02ac9Y02dfdY0315aY034e1Y03893Y03c71Y0407cY044b5Y0491dX1527eX1b37X0149eX04dceX15792X1c94Y0df3Y0f40y012b6Y016a8Y010d6y01487Y018b8Y0fa0Y11136Y112b8Y016aaY11b20Y01489Y018baY11d73Y01320Z0150dZ016acy01b22Y02024Y018bcy01d75Y022beY0171cX025bcX02badY02ee1Y0323eY035c5Y03977Y03d55Y04160Y04599Y04a01Y04e99Y05362Y0585dY05d8bY062edY06884Y06e51Y07455Y07a91Y08106Y187b5Y1194bX028c2X01b9cX020a6X125ffX12bf0X13281X139baX141a3X14a44X153a5X15dceX168c7X17498X18149X18ee2Y19608Y11e10X02363X12907X12f47X1362bX13dbbX145ffX14effX158c3X16353X16eb7X17af7X1881bX1"),
+            new CatalogItem(32, "AirExchanger Caddy", "33Y171Y148Y195Y173Y2d5Y297Y210cY2d7Y1165Y110eY11b3Y1167Y0229Z02a0Z0327y01b5Y03afy0169Y022bY0329y146bZ0528Z0dbX01b7Y0294Y03b1y1154Z11acZ11fdZ1270Z12deZ1370Z13ffZ14b4Z111dX032by046dZ052aZ05fby03b3y06cdy05fdx06e4x01eX04dX0"),
+            new CatalogItem(33, "AirExchanger Motor assembly", "9Y0115X0fY02fY06bY0cbY019Z02bZ044X08fX1102X01a5Z020bZ03dY084Y0f3Y0192Y0269Z02ecZ059Y0163X066X0c4X114eX022Y01beY031Y0219Y046Y0282Y062Z18bZ12faZ138fZ1b3Z1efZ141bZ14d3Z10Z12Z19cZ1d2Z114Z124Z1190Z11f4Z1"),
+            new CatalogItem(34, "AirExchanger End Plate", "82y0f1Y0190y0afy0133Y01eby0f3Y0192Y1269Y0135Y01edY12e1Y03bcZ1466Z1500Z15cfZ186Z1b8Z1f5Y1194Y026bY0382Y04e1Z05aeZ0690Z0788Z0137Y11efY02e3Y041bY0")
+        ];
+    }
     onSelectPart(item, event) {
         editor.part = Part.fromString(item.string);
         editor.updateMesh(true);
-        window.history.pushState({}, document.title, "?part=" + item.string);
+        window.history.pushState({}, document.title, "?part=" + item.string + "&name=" + encodeURIComponent(item.name));
         event.preventDefault();
+        editor.setName(item.name);
     }
 }
 class CatalogItem {
+    part = null;
+    id;
+    string;
+    name;
     constructor(id, name, string) {
-        this.part = null;
         this.id = id;
         this.name = name;
         this.string = string;
@@ -1262,18 +1361,33 @@ var MouseMode;
     MouseMode[MouseMode["Rotate"] = 3] = "Rotate";
 })(MouseMode || (MouseMode = {}));
 class Editor {
+    camera;
+    partRenderer;
+    partNormalDepthRenderer;
+    contourEffect;
+    wireframeRenderer;
+    part;
+    canvas;
+    translation = new Vector3(0, 0, 0);
+    center;
+    rotationX = 45;
+    rotationY = -20;
+    zoom = 5;
+    zoomStep = 0.9;
+    mouseMode = MouseMode.None;
+    lastMousePosition;
+    handles;
+    editorState;
+    style = RenderStyle.Contour;
+    measurements = new Measurements();
+    previousMousePostion;
     constructor() {
-        this.translation = new Vector3(0, 0, 0);
-        this.rotationX = 45;
-        this.rotationY = -20;
-        this.zoom = 5;
-        this.zoomStep = 0.9;
-        this.mouseMode = MouseMode.None;
-        this.style = RenderStyle.Contour;
-        this.measurements = new Measurements();
         var url = new URL(document.URL);
         if (url.searchParams.has("part")) {
             this.part = Part.fromString(url.searchParams.get("part"));
+            if (url.searchParams.has("name")) {
+                this.setName(url.searchParams.get("name"));
+            }
         }
         else {
             this.part = Part.fromString(catalog.items[Math.floor(Math.random() * catalog.items.length)].string);
@@ -1281,6 +1395,7 @@ class Editor {
         this.displayMeasurements();
         this.editorState = new EditorState();
         this.canvas = document.getElementById('canvas');
+        this.canvas.tabIndex = 0;
         this.camera = new Camera(this.canvas);
         this.partRenderer = new MeshRenderer();
         this.partRenderer.color = new Vector3(0.67, 0.7, 0.71);
@@ -1303,9 +1418,11 @@ class Editor {
         this.canvas.addEventListener("mousemove", (event) => this.onMouseMove(event));
         this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
         this.canvas.addEventListener("wheel", (event) => this.onScroll(event));
+        window.addEventListener("keydown", (event) => this.onKeydown(event));
         document.getElementById("clear").addEventListener("click", (event) => this.clear());
         document.getElementById("share").addEventListener("click", (event) => this.share());
-        document.getElementById("save").addEventListener("click", (event) => this.saveSTL());
+        document.getElementById("save-stl").addEventListener("click", (event) => this.saveSTL());
+        document.getElementById("save-studio").addEventListener("click", (event) => this.saveStudioPart());
         document.getElementById("remove").addEventListener("click", (event) => this.remove());
         document.getElementById("style").addEventListener("change", (event) => this.setRenderStyle(parseInt(event.srcElement.value)));
         window.addEventListener("resize", (e) => this.camera.onResize());
@@ -1316,13 +1433,18 @@ class Editor {
         this.initializeEditor("size", (sizeName) => this.setSize(sizeName));
         this.initializeEditor("rounded", (roundedName) => this.setRounded(roundedName));
         document.getElementById("blockeditor").addEventListener("toggle", (event) => this.onNodeEditorClick(event));
+        this.getNameTextbox().addEventListener("change", (event) => this.onPartNameChange(event));
+        this.getNameTextbox().addEventListener("keyup", (event) => this.onPartNameChange(event));
     }
     onNodeEditorClick(event) {
         this.handles.visible = event.srcElement.open;
         this.camera.render();
     }
     saveSTL() {
-        new PartMeshGenerator(this.part, this.measurements).getMesh().saveSTLFile(this.measurements.technicUnit);
+        STLExporter.saveSTLFile(this.part, this.measurements, this.getName());
+    }
+    saveStudioPart() {
+        StudioPartExporter.savePartFile(this.part, this.measurements, this.getName());
     }
     initializeEditor(elementId, onchange) {
         var element = document.getElementById(elementId);
@@ -1338,7 +1460,12 @@ class Editor {
         this.updateMesh();
     }
     share() {
-        window.history.pushState({}, document.title, "?part=" + this.part.toString());
+        var name = this.getName();
+        var url = "?part=" + this.part.toString();
+        if (name.length != 0) {
+            url += '&name=' + encodeURIComponent(name);
+        }
+        window.history.pushState({}, document.title, url);
     }
     remove() {
         this.part.clearBlock(this.handles.getSelectedBlock(), this.editorState.orientation);
@@ -1413,6 +1540,7 @@ class Editor {
                 .times(Matrix4.getTranslation(this.translation.plus(new Vector3(0, 0, -15))));
     }
     onMouseDown(event) {
+        this.canvas.focus();
         const { ctrlKey, shiftKey } = event;
         if (event.button === 0 && !ctrlKey && !shiftKey) {
             if (this.handles.onMouseDown(event)) {
@@ -1421,6 +1549,7 @@ class Editor {
         }
         else if (event.button === 1 || shiftKey) {
             this.mouseMode = MouseMode.Translate;
+            this.previousMousePostion = [event.clientX, event.clientY];
         }
         else if (event.button === 2 || ctrlKey) {
             this.mouseMode = MouseMode.Rotate;
@@ -1439,7 +1568,8 @@ class Editor {
                 this.handles.onMouseMove(event);
                 break;
             case MouseMode.Translate:
-                this.translation = this.translation.plus(new Vector3(event.movementX, -event.movementY, 0).times(this.camera.size / gl.drawingBufferHeight));
+                this.translation = this.translation.plus(new Vector3(event.clientX - this.previousMousePostion[0], -(event.clientY - this.previousMousePostion[1]), 0).times(this.camera.size / this.canvas.clientHeight));
+                this.previousMousePostion = [event.clientX, event.clientY];
                 this.updateTransform();
                 this.camera.render();
                 break;
@@ -1455,6 +1585,30 @@ class Editor {
         this.zoom *= event.deltaY < 0 ? this.zoomStep : 1 / this.zoomStep;
         this.camera.size = this.zoom;
         this.camera.render();
+    }
+    onKeydown(event) {
+        const keyActions = {
+            '1': () => this.setType('pinhole'),
+            '2': () => this.setType('axlehole'),
+            '3': () => this.setType('pin'),
+            '4': () => this.setType('axle'),
+            '5': () => this.setType('solid'),
+            '6': () => this.setType('balljoint'),
+            'y': () => this.setOrientation('y'),
+            'z': () => this.setOrientation('z'),
+            'x': () => this.setOrientation('x'),
+            'PageUp': () => this.handles.move(new Vector3(0, 1, 0)),
+            'PageDown': () => this.handles.move(new Vector3(0, -1, 0)),
+            'ArrowLeft': () => this.handles.move(new Vector3(0, 0, 1)),
+            'ArrowRight': () => this.handles.move(new Vector3(0, 0, -1)),
+            'ArrowUp': () => this.handles.move(new Vector3(-1, 0, 0)),
+            'ArrowDown': () => this.handles.move(new Vector3(1, 0, 0)),
+            'Backspace': () => this.remove(),
+            'Delete': () => this.remove(),
+        };
+        if (event.key in keyActions && document.activeElement == this.canvas) {
+            keyActions[event.key]();
+        }
     }
     displayMeasurements() {
         for (var namedMeasurement of NAMED_MEASUREMENTS) {
@@ -1474,14 +1628,35 @@ class Editor {
         this.displayMeasurements();
         this.updateMesh();
     }
+    getNameTextbox() {
+        return document.getElementById('partName');
+    }
+    getName() {
+        var name = this.getNameTextbox().value.trim();
+        if (name.length == 0) {
+            name = 'Part';
+        }
+        return name;
+    }
+    onPartNameChange(event) {
+        var name = this.getNameTextbox().value.trim();
+        if (name.length == 0) {
+            document.title = 'Part Designer';
+        }
+        else {
+            document.title = name + ' ⋅ Part Designer';
+        }
+    }
+    setName(name) {
+        document.title = name + ' ⋅ Part Designer';
+        this.getNameTextbox().value = name;
+    }
 }
 class EditorState {
-    constructor() {
-        this.orientation = Orientation.X;
-        this.type = BlockType.PinHole;
-        this.fullSize = true;
-        this.rounded = true;
-    }
+    orientation = Orientation.X;
+    type = BlockType.PinHole;
+    fullSize = true;
+    rounded = true;
 }
 const ARROW_RADIUS_INNER = 0.05;
 const ARROW_RADIUS_OUTER = 0.15;
@@ -1500,25 +1675,24 @@ var Axis;
     Axis[Axis["Z"] = 3] = "Z";
 })(Axis || (Axis = {}));
 class Handles {
-    constructor(camera) {
-        this.meshRenderers = [];
-        this.handleAlpha = Vector3.one().times(UNSELECTED_ALPHA);
-        this.grabbedAxis = Axis.None;
-        this.visible = true;
-        this.fullSize = true;
-        this.orientation = Orientation.X;
-        this.box = new WireframeBox();
-        let mesh = Handles.getArrowMesh(20);
-        this.xNegative = this.createRenderer(mesh, new Vector3(1, 0, 0));
-        this.xPositive = this.createRenderer(mesh, new Vector3(1, 0, 0));
-        this.yNegative = this.createRenderer(mesh, new Vector3(0, 1, 0));
-        this.yPositive = this.createRenderer(mesh, new Vector3(0, 1, 0));
-        this.zNegative = this.createRenderer(mesh, new Vector3(0, 0, 1));
-        this.zPositive = this.createRenderer(mesh, new Vector3(0, 0, 1));
-        this.block = Vector3.zero();
-        this.setMode(true, Orientation.X, false);
-        this.camera = camera;
-    }
+    xNegative;
+    xPositive;
+    yNegative;
+    yPositive;
+    zNegative;
+    zPositive;
+    meshRenderers = [];
+    position;
+    block;
+    camera;
+    handleAlpha = Vector3.one().times(UNSELECTED_ALPHA);
+    grabbedAxis = Axis.None;
+    grabbedPosition;
+    visible = true;
+    box;
+    fullSize = true;
+    orientation = Orientation.X;
+    size;
     createRenderer(mesh, color) {
         let renderer = new MeshRenderer();
         renderer.setMesh(mesh);
@@ -1541,6 +1715,19 @@ class Handles {
         else {
             return worldPosition.times(2).minus(Vector3.one().minus(FORWARD[this.orientation]).times(0.5)).floor();
         }
+    }
+    constructor(camera) {
+        this.box = new WireframeBox();
+        let mesh = Handles.getArrowMesh(20);
+        this.xNegative = this.createRenderer(mesh, new Vector3(1, 0, 0));
+        this.xPositive = this.createRenderer(mesh, new Vector3(1, 0, 0));
+        this.yNegative = this.createRenderer(mesh, new Vector3(0, 1, 0));
+        this.yPositive = this.createRenderer(mesh, new Vector3(0, 1, 0));
+        this.zNegative = this.createRenderer(mesh, new Vector3(0, 0, 1));
+        this.zPositive = this.createRenderer(mesh, new Vector3(0, 0, 1));
+        this.block = Vector3.zero();
+        this.setMode(true, Orientation.X, false);
+        this.camera = camera;
     }
     render(camera) {
         if (!this.visible) {
@@ -1659,6 +1846,12 @@ class Handles {
             this.animatePositionAndSize(this.getBlockCenter(this.block), this.size, false, 100);
         }
     }
+    move(direction) {
+        this.position = this.position.plus(direction);
+        this.block = this.getBlock(this.position);
+        this.updateTransforms();
+        this.camera.render();
+    }
     getSelectedBlock() {
         return this.block;
     }
@@ -1715,6 +1908,11 @@ class Handles {
     }
 }
 class NamedMeasurement {
+    name;
+    relative;
+    displayDouble;
+    domElement;
+    resetElement;
     constructor(name, relative, displayDouble) {
         this.name = name;
         this.relative = relative;
@@ -1784,7 +1982,263 @@ var RenderStyle;
     RenderStyle[RenderStyle["Wireframe"] = 2] = "Wireframe";
     RenderStyle[RenderStyle["SolidWireframe"] = 3] = "SolidWireframe";
 })(RenderStyle || (RenderStyle = {}));
+class STLExporter {
+    buffer;
+    view;
+    constructor(size) {
+        this.buffer = new ArrayBuffer(size);
+        this.view = new DataView(this.buffer, 0, size);
+    }
+    writeVector(offset, vector) {
+        this.view.setFloat32(offset, vector.z, true);
+        this.view.setFloat32(offset + 4, vector.x, true);
+        this.view.setFloat32(offset + 8, vector.y, true);
+    }
+    writeTriangle(offset, triangle, scalingFactor) {
+        this.writeVector(offset, triangle.normal().times(-1));
+        this.writeVector(offset + 12, triangle.v1.times(scalingFactor));
+        this.writeVector(offset + 24, triangle.v2.times(scalingFactor));
+        this.writeVector(offset + 36, triangle.v3.times(scalingFactor));
+        this.view.setInt16(offset + 48, 0, true);
+    }
+    static fixOpenEdges(triangles) {
+        var points = [];
+        for (var triangle of triangles) {
+            if (!containsPoint(points, triangle.v1)) {
+                points.push(triangle.v1);
+            }
+            if (!containsPoint(points, triangle.v2)) {
+                points.push(triangle.v2);
+            }
+            if (!containsPoint(points, triangle.v3)) {
+                points.push(triangle.v3);
+            }
+        }
+        var result = [];
+        for (var triangle of triangles) {
+            var edge1Hits = [0];
+            var edge2Hits = [0];
+            var edge3Hits = [0];
+            var edge1Direction = triangle.v2.minus(triangle.v1);
+            var edge2Direction = triangle.v3.minus(triangle.v2);
+            var edge3Direction = triangle.v1.minus(triangle.v3);
+            let edge1LengthSquared = Math.pow(edge1Direction.magnitude(), 2);
+            let edge2LengthSquared = Math.pow(edge2Direction.magnitude(), 2);
+            let edge3LengthSquared = Math.pow(edge3Direction.magnitude(), 2);
+            for (var point of points) {
+                var vertex1Relative = point.minus(triangle.v1);
+                var vertex2Relative = point.minus(triangle.v2);
+                var vertex3Relative = point.minus(triangle.v3);
+                if (Vector3.isCollinear(edge1Direction, vertex1Relative)) {
+                    let progress = vertex1Relative.dot(edge1Direction) / edge1LengthSquared;
+                    if (progress > 0.0001 && progress < 0.999) {
+                        edge1Hits.push(progress);
+                        continue;
+                    }
+                    continue;
+                }
+                if (Vector3.isCollinear(edge2Direction, vertex2Relative)) {
+                    let progress = vertex2Relative.dot(edge2Direction) / edge2LengthSquared;
+                    if (progress > 0.0001 && progress < 0.999) {
+                        edge2Hits.push(progress);
+                        continue;
+                    }
+                    continue;
+                }
+                if (Vector3.isCollinear(edge3Direction, vertex3Relative)) {
+                    let progress = vertex3Relative.dot(edge3Direction) / edge3LengthSquared;
+                    if (progress > 0.0001 && progress < 0.999) {
+                        edge3Hits.push(progress);
+                        continue;
+                    }
+                    continue;
+                }
+            }
+            if (edge1Hits.length == 1 && edge2Hits.length == 1 && edge3Hits.length == 1) {
+                result.push(triangle);
+                continue;
+            }
+            edge1Hits.sort();
+            edge2Hits.sort();
+            edge3Hits.sort();
+            for (var i = 0; i < edge1Hits.length - 1; i++) {
+                result.push(new Triangle(triangle.getOnEdge1(edge1Hits[i]), triangle.getOnEdge1(edge1Hits[i + 1]), triangle.getOnEdge3(edge3Hits[edge3Hits.length - 1])));
+            }
+            for (var i = 0; i < edge2Hits.length - 1; i++) {
+                result.push(new Triangle(triangle.getOnEdge2(edge2Hits[i]), triangle.getOnEdge2(edge2Hits[i + 1]), triangle.getOnEdge1(edge1Hits[edge1Hits.length - 1])));
+            }
+            for (var i = 0; i < edge3Hits.length - 1; i++) {
+                result.push(new Triangle(triangle.getOnEdge3(edge3Hits[i]), triangle.getOnEdge3(edge3Hits[i + 1]), triangle.getOnEdge2(edge2Hits[edge2Hits.length - 1])));
+            }
+            if (edge1Hits.length > 1 && edge2Hits.length == 1) {
+                result.push(new Triangle(triangle.getOnEdge1(edge1Hits[edge1Hits.length - 1]), triangle.getOnEdge2(edge2Hits[0]), triangle.getOnEdge3(edge3Hits[edge3Hits.length - 1])));
+            }
+            else if (edge2Hits.length > 1 && edge3Hits.length == 1) {
+                result.push(new Triangle(triangle.getOnEdge2(edge2Hits[edge2Hits.length - 1]), triangle.getOnEdge3(edge3Hits[0]), triangle.getOnEdge1(edge1Hits[edge1Hits.length - 1])));
+            }
+            else if (edge3Hits.length > 1 && edge1Hits.length == 1) {
+                result.push(new Triangle(triangle.getOnEdge3(edge3Hits[edge3Hits.length - 1]), triangle.getOnEdge1(edge1Hits[0]), triangle.getOnEdge2(edge2Hits[edge2Hits.length - 1])));
+            }
+        }
+        return result;
+    }
+    static createBuffer(part, measurements) {
+        let mesh = new PartMeshGenerator(part, measurements).getMesh();
+        let triangles = STLExporter.fixOpenEdges(mesh.triangles);
+        let exporter = new STLExporter(84 + 50 * triangles.length);
+        for (var i = 0; i < 80; i++) {
+            exporter.view.setInt8(i, 0);
+        }
+        var p = 80;
+        exporter.view.setInt32(p, triangles.length, true);
+        p += 4;
+        for (let triangle of triangles) {
+            exporter.writeTriangle(p, triangle, measurements.technicUnit);
+            p += 50;
+        }
+        return exporter.buffer;
+    }
+    static saveSTLFile(part, measurements, name = "part") {
+        let filename = name.toLowerCase().replaceAll(" ", "_") + ".stl";
+        let blob = new Blob([STLExporter.createBuffer(part, measurements)], { type: "application/octet-stream" });
+        let link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+    }
+}
+class StudioPartExporter {
+    static formatPoint(vector) {
+        return (vector.x * 20).toFixed(4) + " " + (-vector.y * 20).toFixed(4) + " " + (-vector.z * 20).toFixed(4);
+    }
+    static formatVector(vector) {
+        return (vector.x).toFixed(4) + " " + (-vector.y).toFixed(4) + " " + (-vector.z).toFixed(4);
+    }
+    static formatConnector(position, block, facesForward) {
+        let result = "0 PE_CONN ";
+        switch (block.type) {
+            case BlockType.PinHole:
+                result += "0 2";
+                break;
+            case BlockType.AxleHole:
+                result += "0 6";
+                break;
+            case BlockType.Axle:
+                result += "0 7";
+                break;
+            case BlockType.Pin:
+                result += "0 3";
+                break;
+            case BlockType.BallJoint:
+                result += "1 5";
+                break;
+            default: throw new Error("Unknown block type: " + block.type);
+        }
+        if (facesForward) {
+            result += " "
+                + StudioPartExporter.formatVector(block.right) + " "
+                + StudioPartExporter.formatVector(block.forward) + " "
+                + StudioPartExporter.formatVector(block.up) + " "
+                + StudioPartExporter.formatPoint(position.plus(new Vector3(1, 1, 1).plus(block.forward)).times(0.5));
+        }
+        else {
+            result += " "
+                + StudioPartExporter.formatVector(block.right.times(-1)) + " "
+                + StudioPartExporter.formatVector(block.forward.times(-1)) + " "
+                + StudioPartExporter.formatVector(block.up) + " "
+                + StudioPartExporter.formatPoint(position.plus(new Vector3(1, 1, 1).minus(block.forward)).times(0.5));
+        }
+        result += " 0 0 0.8 0 0\n";
+        return result;
+    }
+    static createFileContent(part, measurements, name, filename) {
+        let smallBlocks = part.createSmallBlocks();
+        let mesh = new PartMeshGenerator(part, measurements).getMesh();
+        var result = `0 FILE ` + filename + `
+0 Description: part
+0 Name: ` + name + `
+0 Author: 
+0 BFC CERTIFY CCW
+1 16 0.0000 -0.5000 0.0000 1.0000 0.0000 0.0000 0.0000 1.0000 0.0000 0.0000 0.0000 1.0000 part.obj_grouped
+0 NOFILE
+0 FILE part.obj_grouped
+0 Description: part.obj_grouped
+0 Name: 
+0 Author: 
+0 ModelType: Part
+0 BFC CERTIFY CCW
+1 16 0.0000 0.0000 0.0000 1.0000 0.0000 0.0000 0.0000 1.0000 0.0000 0.0000 0.0000 1.0000 part.obj
+`;
+        for (let position of part.blocks.keys()) {
+            let startBlock = part.blocks.get(position);
+            if (startBlock.type == BlockType.Solid) {
+                continue;
+            }
+            let previousBlock = part.blocks.getOrNull(position.minus(startBlock.forward));
+            let isFirstInRow = previousBlock == null || previousBlock.orientation != startBlock.orientation || previousBlock.type != startBlock.type;
+            if (!isFirstInRow) {
+                continue;
+            }
+            let facesForward = false;
+            if (startBlock.isAttachment) {
+                for (let x = 0; x <= 1; x++) {
+                    for (let y = 0; y <= 1; y++) {
+                        let supportBlockPosition = position.minus(startBlock.forward).plus(startBlock.right.times(x)).plus(startBlock.up.times(y));
+                        let supportBlock = smallBlocks.getOrNull(supportBlockPosition);
+                        if (supportBlock != null && !supportBlock.isAttachment) {
+                            facesForward = true;
+                            break;
+                        }
+                    }
+                    if (facesForward) {
+                        break;
+                    }
+                }
+            }
+            let block = startBlock;
+            let offset = 0;
+            while (true) {
+                let nextBlock = part.blocks.getOrNull(position.plus(startBlock.forward));
+                let isLastInRow = nextBlock == null || nextBlock.orientation != startBlock.orientation || nextBlock.type != startBlock.type;
+                if (isLastInRow && offset % 2 == 0 && offset > 0) {
+                    result += StudioPartExporter.formatConnector(position.minus(startBlock.forward), block, facesForward);
+                }
+                else if (offset % 2 == 0) {
+                    result += StudioPartExporter.formatConnector(position, block, facesForward);
+                }
+                if (isLastInRow) {
+                    break;
+                }
+                offset += 1;
+                position = position.plus(startBlock.forward);
+                block = nextBlock;
+            }
+        }
+        result += `
+0 NOFILE
+0 FILE part.obj
+0 Description: part.obj
+0 Name: 
+0 Author: 
+0 BFC CERTIFY CCW
+`;
+        for (let triangle of mesh.triangles) {
+            result += "3 16 " + this.formatPoint(triangle.v1) + " " + this.formatPoint(triangle.v2) + " " + this.formatPoint(triangle.v3) + "\n";
+        }
+        result += "0 NOFILE\n";
+        return result;
+    }
+    static savePartFile(part, measurements, name = "part") {
+        let filename = name.toLowerCase().replaceAll(" ", "_") + ".part";
+        let content = StudioPartExporter.createFileContent(part, measurements, name, filename);
+        let link = document.createElement('a');
+        link.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(content);
+        link.download = filename;
+        link.click();
+    }
+}
 class Matrix4 {
+    elements;
     constructor(elements) {
         this.elements = elements;
     }
@@ -1894,9 +2348,10 @@ class Matrix4 {
     }
 }
 class Mesh {
+    triangles;
+    vertexBuffer = null;
+    normalBuffer = null;
     constructor(triangles) {
-        this.vertexBuffer = null;
-        this.normalBuffer = null;
         this.triangles = triangles;
     }
     createVertexBuffer() {
@@ -1958,46 +2413,15 @@ class Mesh {
         array.push(vector.y);
         array.push(vector.z);
     }
-    createSTLFile(scalingFactor) {
-        let size = 84 + 50 * this.triangles.length;
-        var buffer = new ArrayBuffer(size);
-        let view = new DataView(buffer, 0, size);
-        for (var i = 0; i < 80; i++) {
-            view.setInt8(i, 0);
-        }
-        var p = 80;
-        view.setInt32(p, this.triangles.length, true);
-        p += 4;
-        for (let triangle of this.triangles) {
-            this.writeTriangle(view, p, triangle, scalingFactor);
-            p += 50;
-        }
-        return buffer;
-    }
-    writeVector(view, offset, vector) {
-        view.setFloat32(offset, vector.z, true);
-        view.setFloat32(offset + 4, vector.x, true);
-        view.setFloat32(offset + 8, vector.y, true);
-    }
-    writeTriangle(view, offset, triangle, scalingFactor) {
-        this.writeVector(view, offset, triangle.normal());
-        this.writeVector(view, offset + 12, triangle.v1.times(scalingFactor));
-        this.writeVector(view, offset + 24, triangle.v2.times(scalingFactor));
-        this.writeVector(view, offset + 36, triangle.v3.times(scalingFactor));
-        view.setInt16(offset + 48, 0, true);
-    }
-    saveSTLFile(scalingFactor, filename = "part.stl") {
-        let blob = new Blob([this.createSTLFile(scalingFactor)], { type: "application/octet-stream" });
-        let link = document.createElement('a');
-        link.href = window.URL.createObjectURL(blob);
-        link.download = filename;
-        link.click();
-    }
     getVertexCount() {
         return this.triangles.length * 3;
     }
 }
 class Quaternion {
+    x;
+    y;
+    z;
+    w;
     constructor(x, y, z, w) {
         this.x = x;
         this.y = y;
@@ -2029,6 +2453,8 @@ class Quaternion {
     }
 }
 class Ray {
+    point;
+    direction;
     constructor(point, direction) {
         this.point = point;
         this.direction = direction;
@@ -2054,6 +2480,9 @@ class Ray {
     }
 }
 class Triangle {
+    v1;
+    v2;
+    v3;
     constructor(v1, v2, v3, flipped = false) {
         if (flipped) {
             this.v1 = v2;
@@ -2069,8 +2498,20 @@ class Triangle {
     normal() {
         return this.v3.minus(this.v1).cross(this.v2.minus(this.v1)).normalized();
     }
+    getOnEdge1(progress) {
+        return Vector3.interpolate(this.v1, this.v2, progress);
+    }
+    getOnEdge2(progress) {
+        return Vector3.interpolate(this.v2, this.v3, progress);
+    }
+    getOnEdge3(progress) {
+        return Vector3.interpolate(this.v3, this.v1, progress);
+    }
 }
 class TriangleWithNormals extends Triangle {
+    n1;
+    n2;
+    n3;
     constructor(v1, v2, v3, n1, n2, n3) {
         super(v1, v2, v3);
         this.n1 = n1;
@@ -2079,6 +2520,9 @@ class TriangleWithNormals extends Triangle {
     }
 }
 class Vector3 {
+    x;
+    y;
+    z;
     constructor(x, y, z) {
         this.x = x;
         this.y = y;
@@ -2143,6 +2587,42 @@ class Vector3 {
     static lerp(a, b, progress) {
         return a.plus(b.minus(a).times(progress));
     }
+    static isCollinear(a, b) {
+        var factor = null;
+        if (a.x == 0 || b.x == 0) {
+            if (Math.abs(a.x + b.x) > 0.001) {
+                return false;
+            }
+        }
+        else {
+            factor = a.x / b.x;
+        }
+        if (a.y == 0 || b.y == 0) {
+            if (Math.abs(a.y + b.y) > 0.001) {
+                return false;
+            }
+        }
+        else {
+            if (factor == null) {
+                factor = a.y / b.y;
+            }
+            else if (Math.abs(factor - a.y / b.y) > 0.001) {
+                return false;
+            }
+        }
+        if (a.z == 0 || b.z == 0) {
+            if (Math.abs(a.z + b.z) > 0.001) {
+                return false;
+            }
+        }
+        else if (factor != null && Math.abs(factor - a.z / b.z) > 0.001) {
+            return false;
+        }
+        return true;
+    }
+    static interpolate(a, b, t) {
+        return a.times(1.0 - t).plus(b.times(t));
+    }
 }
 const RIGHT_FACE_VERTICES = [
     new Vector3(1, 1, 0),
@@ -2189,9 +2669,7 @@ const FACE_DIRECTIONS = [
     new Vector3(0, 0, -1)
 ];
 class VectorDictionary {
-    constructor() {
-        this.data = {};
-    }
+    data = {};
     containsKey(key) {
         return key.x in this.data && key.y in this.data[key.x] && key.z in this.data[key.x][key.y];
     }
@@ -2254,6 +2732,13 @@ class VectorDictionary {
     }
 }
 class Block {
+    orientation;
+    type;
+    rounded;
+    right;
+    up;
+    forward;
+    isAttachment;
     constructor(orientation, type, rounded) {
         this.orientation = orientation;
         this.type = type;
@@ -2261,6 +2746,7 @@ class Block {
         this.right = RIGHT[this.orientation];
         this.up = UP[this.orientation];
         this.forward = FORWARD[this.orientation];
+        this.isAttachment = this.type == BlockType.Pin || this.type == BlockType.Axle || this.type == BlockType.BallJoint;
     }
 }
 ///<reference path="../geometry/Vector3.ts" />
@@ -2275,9 +2761,7 @@ let CUBE = [
     new Vector3(1, 1, 1)
 ];
 class Part {
-    constructor() {
-        this.blocks = new VectorDictionary();
-    }
+    blocks = new VectorDictionary();
     createSmallBlocks() {
         var result = new VectorDictionary();
         for (let position of this.blocks.keys()) {
@@ -2422,11 +2906,25 @@ class Part {
     }
 }
 class PerpendicularRoundedAdapter {
+    isVertical;
+    neighbor;
+    directionToNeighbor;
+    facesForward;
+    sourceBlock;
 }
 class SmallBlock extends Block {
+    quadrant;
+    position;
+    hasInterior;
+    perpendicularRoundedAdapter = null;
+    localX;
+    localY;
+    directionX;
+    directionY;
+    horizontal;
+    vertical;
     constructor(quadrant, positon, source) {
         super(source.orientation, source.type, source.rounded);
-        this.perpendicularRoundedAdapter = null;
         this.quadrant = quadrant;
         this.position = positon;
         this.hasInterior = source.type != BlockType.Solid;
@@ -2436,7 +2934,6 @@ class SmallBlock extends Block {
         this.directionY = this.localY == 1 ? 1 : -1;
         this.horizontal = this.localX == 1 ? RIGHT[this.orientation] : LEFT[this.orientation];
         this.vertical = this.localY == 1 ? UP[this.orientation] : DOWN[this.orientation];
-        this.isAttachment = this.type == BlockType.Pin || this.type == BlockType.Axle || this.type == BlockType.BallJoint;
     }
     static createFromLocalCoordinates(localX, localY, position, source) {
         return new SmallBlock(SmallBlock.getQuadrantFromLocal(localX, localY), position, source);
@@ -2467,13 +2964,16 @@ class SmallBlock extends Block {
     }
 }
 class TinyBlock extends SmallBlock {
+    exteriorMergedBlocks = 1;
+    isExteriorMerged = false;
+    interiorMergedBlocks = 1;
+    isInteriorMerged = false;
+    visibleFaces = null;
+    angle;
+    isCenter;
+    smallBlockPosition;
     constructor(position, source) {
         super(source.quadrant, position, source);
-        this.exteriorMergedBlocks = 1;
-        this.isExteriorMerged = false;
-        this.interiorMergedBlocks = 1;
-        this.isInteriorMerged = false;
-        this.visibleFaces = null;
         this.visibleFaces = [true, true, true, true, true, true];
         this.perpendicularRoundedAdapter = source.perpendicularRoundedAdapter;
         this.angle = getAngle(this.quadrant);
@@ -2621,12 +3121,15 @@ function getAngle(quadrant) {
     throw new Error("Unknown quadrant: " + quadrant);
 }
 class Camera {
+    renderers = [];
+    transform = Matrix4.getIdentity();
+    size = 5;
+    frameBuffer;
+    normalTexture;
+    depthTexture;
+    clearColor = new Vector3(0.95, 0.95, 0.95);
+    supersample = 1;
     constructor(canvas, supersample = 1) {
-        this.renderers = [];
-        this.transform = Matrix4.getIdentity();
-        this.size = 5;
-        this.clearColor = new Vector3(0.95, 0.95, 0.95);
-        this.supersample = 1;
         gl = canvas.getContext("webgl");
         if (gl == null) {
             throw new Error("WebGL is not supported.");
@@ -2696,8 +3199,10 @@ class Camera {
     }
 }
 class ContourPostEffect {
+    shader;
+    vertices;
+    enabled = true;
     constructor() {
-        this.enabled = true;
         this.shader = new Shader(COUNTOUR_VERTEX, CONTOUR_FRAGMENT);
         this.shader.setAttribute("vertexPosition");
         this.shader.setUniform("normalTexture");
@@ -2731,10 +3236,15 @@ class ContourPostEffect {
     }
 }
 class MeshRenderer {
+    shader;
+    vertices;
+    normals;
+    vertexCount;
+    transform;
+    color = new Vector3(1, 0, 0);
+    alpha = 1;
+    enabled = true;
     constructor() {
-        this.color = new Vector3(1, 0, 0);
-        this.alpha = 1;
-        this.enabled = true;
         this.shader = new Shader(VERTEX_SHADER, FRAGMENT_SHADER);
         this.shader.setAttribute("vertexPosition");
         this.shader.setAttribute("normal");
@@ -2768,8 +3278,13 @@ class MeshRenderer {
     }
 }
 class NormalDepthRenderer {
+    shader;
+    vertices;
+    normals;
+    transform;
+    vertexCount;
+    enabled = true;
     constructor() {
-        this.enabled = true;
         this.prepareShaders();
         this.transform = Matrix4.getIdentity();
     }
@@ -2807,18 +3322,8 @@ class NormalDepthRenderer {
     }
 }
 class Shader {
-    constructor(vertexSource, fragmentSource) {
-        this.attributes = {};
-        const vertexShader = this.loadShader(gl.VERTEX_SHADER, vertexSource);
-        const fragmentShader = this.loadShader(gl.FRAGMENT_SHADER, fragmentSource);
-        this.program = gl.createProgram();
-        gl.attachShader(this.program, vertexShader);
-        gl.attachShader(this.program, fragmentShader);
-        gl.linkProgram(this.program);
-        if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
-            throw new Error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(this.program));
-        }
-    }
+    program;
+    attributes = {};
     loadShader(type, source) {
         let shader = gl.createShader(type);
         gl.shaderSource(shader, source);
@@ -2832,6 +3337,17 @@ class Shader {
         }
         return shader;
     }
+    constructor(vertexSource, fragmentSource) {
+        const vertexShader = this.loadShader(gl.VERTEX_SHADER, vertexSource);
+        const fragmentShader = this.loadShader(gl.FRAGMENT_SHADER, fragmentSource);
+        this.program = gl.createProgram();
+        gl.attachShader(this.program, vertexShader);
+        gl.attachShader(this.program, fragmentShader);
+        gl.linkProgram(this.program);
+        if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
+            throw new Error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(this.program));
+        }
+    }
     setAttribute(name) {
         this.attributes[name] = gl.getAttribLocation(this.program, name);
     }
@@ -2840,13 +3356,16 @@ class Shader {
     }
 }
 class WireframeBox {
+    shader;
+    positions;
+    transform;
+    visible = true;
+    color = new Vector3(0.0, 0.0, 1.0);
+    alpha = 0.8;
+    colorOccluded = new Vector3(0.0, 0.0, 0.0);
+    alphaOccluded = 0.15;
+    scale = Vector3.one();
     constructor() {
-        this.visible = true;
-        this.color = new Vector3(0.0, 0.0, 1.0);
-        this.alpha = 0.8;
-        this.colorOccluded = new Vector3(0.0, 0.0, 0.0);
-        this.alphaOccluded = 0.15;
-        this.scale = Vector3.one();
         this.shader = new Shader(SIMPLE_VERTEX_SHADER, COLOR_FRAGMENT_SHADER);
         this.shader.setAttribute("vertexPosition");
         this.shader.setUniform("projectionMatrix");
@@ -2893,10 +3412,14 @@ class WireframeBox {
     }
 }
 class WireframeRenderer {
+    shader;
+    vertices;
+    vertexCount;
+    transform;
+    enabled = true;
+    color = new Vector3(0.0, 0.0, 0.0);
+    alpha = 0.5;
     constructor() {
-        this.enabled = true;
-        this.color = new Vector3(0.0, 0.0, 0.0);
-        this.alpha = 0.5;
         this.shader = new Shader(SIMPLE_VERTEX_SHADER, COLOR_FRAGMENT_SHADER);
         this.shader.setAttribute("vertexPosition");
         this.shader.setUniform("projectionMatrix");
