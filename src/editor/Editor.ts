@@ -31,11 +31,15 @@ class Editor {
 	style: RenderStyle = RenderStyle.Contour;
 
 	measurements: Measurements = new Measurements();
+	previousMousePostion: [number, number];
 
 	constructor() {
 		var url = new URL(document.URL);
 		if (url.searchParams.has("part")) {
 			this.part = Part.fromString(url.searchParams.get("part"));
+			if (url.searchParams.has("name")) {
+				this.setName(url.searchParams.get("name"));
+			}
 		} else {
 			this.part = Part.fromString(catalog.items[Math.floor(Math.random() * catalog.items.length)].string);
 		}
@@ -45,6 +49,7 @@ class Editor {
 		this.editorState = new EditorState();
 
 		this.canvas = document.getElementById('canvas') as HTMLCanvasElement;
+		this.canvas.tabIndex = 0;
 		this.camera = new Camera(this.canvas);
 		
 		this.partRenderer = new MeshRenderer();
@@ -74,6 +79,7 @@ class Editor {
 		this.canvas.addEventListener("mousemove", (event: MouseEvent) => this.onMouseMove(event));
 		this.canvas.addEventListener("contextmenu", (event: Event) => event.preventDefault());
 		this.canvas.addEventListener("wheel", (event: WheelEvent) => this.onScroll(event));
+		window.addEventListener("keydown", (event: KeyboardEvent) => this.onKeydown(event));
 		document.getElementById("clear").addEventListener("click", (event: MouseEvent) => this.clear());
 		document.getElementById("share").addEventListener("click", (event: MouseEvent) => this.share());
 		document.getElementById("save-stl").addEventListener("click", (event: MouseEvent) => this.saveSTL());
@@ -90,6 +96,9 @@ class Editor {
 		this.initializeEditor("rounded", (roundedName: string) => this.setRounded(roundedName));
 
 		document.getElementById("blockeditor").addEventListener("toggle", (event: MouseEvent) => this.onNodeEditorClick(event));
+
+		this.getNameTextbox().addEventListener("change", (event: Event) => this.onPartNameChange(event));
+		this.getNameTextbox().addEventListener("keyup", (event: Event) => this.onPartNameChange(event));
 	}
 
 	private onNodeEditorClick(event: MouseEvent) {
@@ -98,11 +107,11 @@ class Editor {
 	}
 
 	private saveSTL() {
-		STLExporter.saveSTLFile(this.part, this.measurements);
+		STLExporter.saveSTLFile(this.part, this.measurements, this.getName());
 	}
 
 	private saveStudioPart() {
-		StudioPartExporter.savePartFile(this.part, this.measurements);
+		StudioPartExporter.savePartFile(this.part, this.measurements, this.getName());
 	}
 
 	private initializeEditor(elementId: string, onchange: (value: string) => void) {
@@ -121,7 +130,12 @@ class Editor {
 	}
 
 	private share() {
-		window.history.pushState({}, document.title, "?part=" + this.part.toString());
+		var name = this.getName();
+		var url = "?part=" + this.part.toString();
+		if (name.length != 0) {
+			url += '&name=' + encodeURIComponent(name);
+		}
+		window.history.pushState({}, document.title, url);
 	}
 
 	private remove() {
@@ -208,6 +222,7 @@ class Editor {
 	}
 
 	private onMouseDown(event: MouseEvent) {
+		this.canvas.focus();
 		const {ctrlKey, shiftKey} = event;
 		if (event.button === 0 && !ctrlKey && !shiftKey) {
 			if (this.handles.onMouseDown(event)) {
@@ -215,6 +230,7 @@ class Editor {
 			}
 		} else if (event.button === 1 || shiftKey) {
 			this.mouseMode = MouseMode.Translate;
+			this.previousMousePostion = [event.clientX, event.clientY];
 		} else if (event.button === 2 || ctrlKey) {
 			this.mouseMode = MouseMode.Rotate;
 		}
@@ -234,7 +250,8 @@ class Editor {
 				this.handles.onMouseMove(event);
 				break;
 			case MouseMode.Translate:
-				this.translation = this.translation.plus(new Vector3(event.movementX, -event.movementY, 0).times(this.camera.size / gl.drawingBufferHeight));
+				this.translation = this.translation.plus(new Vector3(event.clientX - this.previousMousePostion[0], -(event.clientY - this.previousMousePostion[1]), 0).times(this.camera.size / this.canvas.clientHeight));
+				this.previousMousePostion = [event.clientX, event.clientY];
 				this.updateTransform();
 				this.camera.render();
 				break;
@@ -248,12 +265,37 @@ class Editor {
 		}
 	}
 
-	private onScroll(event: MouseWheelEvent) {
+	private onScroll(event: WheelEvent) {
 		this.zoom *= event.deltaY < 0 ? this.zoomStep : 1 / this.zoomStep;
 		this.camera.size = this.zoom;
 		this.camera.render();
 	}
 
+	private onKeydown(event: KeyboardEvent) {
+		const keyActions: { [key: string]: () => void } = {
+			'1': () => this.setType('pinhole'),
+			'2': () => this.setType('axlehole'),
+			'3': () => this.setType('pin'),
+			'4': () => this.setType('axle'),
+			'5': () => this.setType('solid'),
+			'6': () => this.setType('balljoint'),
+			'y': () => this.setOrientation('y'),
+			'z': () => this.setOrientation('z'),
+			'x': () => this.setOrientation('x'),
+			'PageUp': () => this.handles.move(new Vector3(0, 1, 0)),
+			'PageDown': () => this.handles.move(new Vector3(0, -1, 0)),
+			'ArrowLeft': () => this.handles.move(new Vector3(0, 0, 1)),
+			'ArrowRight': () => this.handles.move(new Vector3(0, 0, -1)),
+			'ArrowUp': () => this.handles.move(new Vector3(-1, 0, 0)),
+			'ArrowDown': () => this.handles.move(new Vector3(1, 0, 0)),
+			'Backspace': () => this.remove(),
+			'Delete': () => this.remove(),
+		};
+
+		if (event.key in keyActions && document.activeElement == this.canvas) {
+			keyActions[event.key]();
+		}
+	}
 	private displayMeasurements() {
 		for (var namedMeasurement of NAMED_MEASUREMENTS) {
 			namedMeasurement.applyToDom(this.measurements);
@@ -273,5 +315,31 @@ class Editor {
 		this.measurements = new Measurements();
 		this.displayMeasurements();
 		this.updateMesh();
+	}
+
+	public getNameTextbox(): HTMLInputElement {
+		return document.getElementById('partName') as HTMLInputElement;
+	}
+
+	public getName(): string {
+		var name = this.getNameTextbox().value.trim();
+		if (name.length == 0) {
+			name = 'Part';
+		}
+		return name;
+	}
+
+	private onPartNameChange(event: Event) {
+		var name = this.getNameTextbox().value.trim();
+		if (name.length == 0) {
+			document.title = 'Part Designer';
+		} else {
+			document.title = name + ' ⋅ Part Designer';
+		}
+	}
+
+	public setName(name: string) {
+		document.title = name + ' ⋅ Part Designer';
+		this.getNameTextbox().value = name;
 	}
 }

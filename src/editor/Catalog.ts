@@ -50,7 +50,7 @@ class Catalog {
 		for (var item of this.items) {
 			var catalogLink: HTMLAnchorElement = document.createElement("a");
 			catalogLink.className = "catalogItem";
-			catalogLink.href = "?part=" + item.string;
+			catalogLink.href = "?part=" + item.string + "&name=" + encodeURIComponent(item.name);
 			catalogLink.title = item.name;
 			this.container.appendChild(catalogLink);
 			var itemCanvas = document.createElement("canvas");
@@ -224,7 +224,8 @@ class Catalog {
 	private onSelectPart(item: CatalogItem, event: MouseEvent) {
 		editor.part = Part.fromString(item.string);
 		editor.updateMesh(true);
-		window.history.pushState({}, document.title, "?part=" + item.string);
+		window.history.pushState({}, document.title, "?part=" + item.string + "&name=" + encodeURIComponent(item.name));
 		event.preventDefault();
+		editor.setName(item.name);
 	}
 }
